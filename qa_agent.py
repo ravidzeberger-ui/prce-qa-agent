@@ -23,6 +23,20 @@ from docx.oxml import OxmlElement
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
+# ─── עזרים: ימי מסחר ──────────────────────────────────────────────────────────
+def get_last_trading_day(reference_date=None):
+    """מחזיר את יום המסחר האחרון (שני עד שישי בלבד)"""
+    if reference_date is None:
+        reference_date = datetime.now().date()
+    day = reference_date - timedelta(days=1)
+    while day.weekday() >= 5:  # 5=שבת, 6=ראשון
+        day -= timedelta(days=1)
+    return day
+
+def fmt_date_il(d):
+    """ממיר date לפורמט DD.M.YYYY כמו שמוצג באתר"""
+    return f"{d.day}.{d.month}.{d.year}"
+
 # ─── הגדרות ────────────────────────────────────────────────────────────────────
 BASE_URL    = 'https://prce.co.il'
 WP_API      = f'{BASE_URL}/wp-json/wp/v2'
@@ -171,21 +185,22 @@ def run_static_checks():
     except Exception as e:
         results['hero_video'] = {'ok': False, 'detail': str(e)[:80]}
 
-    # API freshness
+    # API freshness — השוואה ליום המסחר האחרון (שני-שישי)
     try:
         r = requests.get(API_URL, timeout=10)
         idx = r.json()['index']
         vdate_str = idx['value_date'][:10]
-        vdate = datetime.strptime(vdate_str, '%Y-%m-%d')
-        today = datetime.now()
-        delta_days = (today - vdate).days
-        # מסחר: אם סוף שבוע, עד 3 ימים נחשב תקין
-        weekday = today.weekday()
-        max_days = 4 if weekday in [0, 1] else 2  # ראשון/שני → 4, אחרת 2
-        if delta_days > max_days:
-            results['api_freshness'] = {'ok': False, 'detail': f'נתוני API ישנים: {vdate_str} ({delta_days} ימים לאחור)'}
+        vdate_date = datetime.strptime(vdate_str, '%Y-%m-%d').date()
+        last_trading = get_last_trading_day()
+        if vdate_date < last_trading:
+            results['api_freshness'] = {
+                'ok': False,
+                'detail': (f'נתוני API מיושנים: מוצג {vdate_str} — '
+                           f'יום המסחר האחרון היה {fmt_date_il(last_trading)} ({last_trading})')
+            }
         else:
-            results['api_freshness'] = {'ok': True, 'detail': f'עדכני: {vdate_str} ({delta_days} ימים)'}
+            delta = (datetime.now().date() - vdate_date).days
+            results['api_freshness'] = {'ok': True, 'detail': f'עדכני: {vdate_str} ({delta} ימים)'}
     except Exception as e:
         results['api_freshness'] = {'ok': False, 'detail': str(e)[:80]}
 
@@ -600,6 +615,11 @@ async def check_page(page, page_info, expected, device):
                            'detail': 'לא נמצא ווידג\'ט עם ערך מספרי',
                            'fix': 'בדוק ידנית שהמדד מוצג בדפדפן'})
 
+        # בדיקת תאריך עדכון — חייב להיות יום המסחר האחרון (שני-שישי)
+        last_trading_day = get_last_trading_day()
+        last_trading_fmt = fmt_date_il(last_trading_day)
+        api_vdate = datetime.strptime(expected['value_date'], '%Y-%m-%d').date()
+
         date_ok = await page.evaluate(f"""
             () => [...document.querySelectorAll('.elementor-widget[data-id]')]
                    .some(w => (w.innerText || '').trim() === '{expected["date"]}')
@@ -608,6 +628,14 @@ async def check_page(page, page_info, expected, device):
             issues.append({'severity': 'warning', 'check': 'תאריך עדכון מדד',
                            'detail': f'לא נמצא תאריך {expected["date"]} בעמוד',
                            'fix': 'בדוק שה-snippet מעדכן שדה התאריך'})
+        elif api_vdate < last_trading_day:
+            # האתר מציג תאריך תקין מהAPI, אבל הAPI עצמו מיושן — זה באג
+            issues.append({'severity': 'error', 'check': 'תאריך עדכון מדד — נתונים מיושנים ❗',
+                           'detail': (f'האתר מציג נתוני {expected["date"]} '
+                                      f'אך יום המסחר האחרון היה {last_trading_fmt} — '
+                                      f'הנתונים לא עודכנו!'),
+                           'fix': ('בדוק שה-API מחזיר את נתוני יום המסחר האחרון. '
+                                   'ייתכן שתהליך העדכון נכשל — בדוק לוגים ואת מקור הנתונים.')})
 
     # ══════════════════════════════════════════════════════
     # 20. כפתור טלפון
