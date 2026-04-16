@@ -1,0 +1,49 @@
+name: QA Daily Report
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # 10:00 שעון ישראל (UTC+3 קיץ)
+  workflow_dispatch:        # הפעלה ידנית מ-GitHub
+
+jobs:
+  run-qa-agent:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt twilio
+
+      - name: Install Playwright browsers
+        run: python -m playwright install chromium firefox
+
+      - name: Create config.py from secrets
+        run: |
+          cat > config.py << 'EOF'
+          WHATSAPP_PHONE     = '${{ secrets.WHATSAPP_PHONE }}'
+          TWILIO_ACCOUNT_SID = '${{ secrets.TWILIO_ACCOUNT_SID }}'
+          TWILIO_AUTH_TOKEN  = '${{ secrets.TWILIO_AUTH_TOKEN }}'
+          TWILIO_FROM_NUMBER = '${{ secrets.TWILIO_FROM_NUMBER }}'
+          EOF
+
+      - name: Run QA Agent
+        run: python qa_agent.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+      - name: Upload QA Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-report-${{ github.run_number }}
+          path: reports/
+          retention-days: 30
