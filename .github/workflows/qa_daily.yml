@@ -23,8 +23,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt twilio
 
-      - name: Install Playwright browsers
-        run: python -m playwright install chromium firefox webkit
+      - name: Install Playwright browsers with system dependencies
+        run: python -m playwright install --with-deps chromium firefox webkit
 
       - name: Create config.py from secrets
         run: |
