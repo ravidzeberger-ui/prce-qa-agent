@@ -719,7 +719,9 @@ async def check_page(page, page_info, expected, device):
     # ══════════════════════════════════════════════════════
     ss_name = f"{device['name'].replace(' ','_')}_{page_info['path'].strip('/').replace('/','_') or 'home'}.png"
     ss_path = SCREENSHOTS_DIR / ss_name
-    await page.screenshot(path=str(ss_path), full_page=False)
+    # full_page=True רק ב-Chrome 1920 (לדוח מפורט), שאר המכשירים viewport בלבד
+    full = (device['name'] == 'Desktop Chrome 1920')
+    await page.screenshot(path=str(ss_path), full_page=full)
 
     return {
         'page':       page_info['name'],
@@ -774,6 +776,43 @@ def add_row(tbl, values, bg='FFFFFF'):
         row.cells[i].text = str(val)[:200]
         set_cell_bg(row.cells[i], bg)
     return row
+
+# ─── הסברים לכל סוג בעיה (מה המשמעות ומה הסיכון) ────────────────────────────
+ISSUE_EXPLANATIONS = {
+    'תאריך עדכון מדד':     ('⚠️ אמינות', 'מבקר שנכנס לאתר רואה נתוני מדד ישנים. זה פוגע ישירות באמינות פרסייס — האתר נועד להציג נתוני שוק עדכניים. אם הנתונים מיושנים, משתמשים לא יחזרו.'),
+    'CSS גלובלי':           ('🎨 נראות', 'קובץ עיצוב ראשי של Elementor לא נטען — האתר ייראה ללא צבעים, ללא פונטים וללא עיצוב. כל המבקרים יראו דף לבן/שבור. זה קרה ב-16.4 וגרם ל-crash של האתר.'),
+    'תוכן עמוד':            ('🎨 נראות', 'גובה העמוד חשוד מאוד — ייתכן שהעמוד ריק לחלוטין. מבקרים יראו עמוד ריק ויעזבו מיד.'),
+    'sections גלויים':      ('🎨 נראות', 'מעט מאוד sections גלויים בעמוד — ייתכן שחלקים גדולים מהעמוד מוסתרים בגלל תקלת CSS.'),
+    'נתונים מיושנים':       ('⚠️ אמינות', 'נתוני ה-API אינם מעודכנים. מבקרים רואים מידע ישן שמפחית את הערך של האתר.'),
+    'noindex':              ('🔴 SEO קריטי', 'העמוד מסומן "noindex" — גוגל לא יאנדקס אותו ולא יציג אותו בתוצאות חיפוש. זה עלול למחוק את כל הדירוג שנצבר לאותו עמוד.'),
+    'H1':                   ('📈 SEO', 'כותרת H1 היא הסימן הכי חשוב לגוגל לגבי נושא העמוד. ללא H1, גוגל מתקשה לדרג את העמוד לביטויי חיפוש רלוונטיים.'),
+    'Mixed Content':        ('🔒 אבטחה', 'טעינת תוכן HTTP על אתר HTTPS גורמת לדפדפן להציג אזהרת אבטחה. גוגל Chrome חוסם תוכן כזה אוטומטית.'),
+    'כותרת עמוד':           ('📈 SEO', 'גוגל מציג עד 60 תווים בכותרת בתוצאות החיפוש. כותרת ארוכה תחתך — משתמשים יראו "..." ויפחות ילחצו. פוגע ב-CTR.'),
+    'תיאור מטא':            ('📈 SEO', 'ה-meta description מופיע מתחת לכותרת בגוגל. ללא תיאור — גוגל יבחר טקסט אקראי מהעמוד שלרוב לא מושך לחיצות.'),
+    'Canonical':            ('📈 SEO', 'ללא Canonical URL גוגל עלול לחשוב שיש כמה גרסאות של אותו עמוד ולפצל את הדירוג ביניהן (Duplicate Content).'),
+    'Open Graph':           ('📱 שיתוף', 'כשמישהו משתף קישור לאתר בוואצאפ/פייסבוק/לינקדאין — ללא OG tags יוצג קישור ריק ללא תמונה וללא כותרת. פוגע מאוד בפרסום.'),
+    'Alt Text':             ('♿ נגישות + SEO', 'תמונות ללא alt text אינן נגישות לעיוורים, ולא מאונדקסות ב-Google Images. זה גם פוגע בציון הנגישות של האתר.'),
+    'RTL':                  ('🌐 נגישות', 'אתר בעברית חייב להיות מוגדר RTL. ללא זה — טקסט מופיע בכיוון שגוי ב-layout ונגישות נפגעת.'),
+    'קישורים חיצוניים':    ('🔒 אבטחה', 'קישור שנפתח בטאב חדש ללא rel="noopener" מאפשר לאתר החיצוני לגשת לחלון שלנו דרך JavaScript. זו פרצת אבטחה ידועה.'),
+    'תפריט ניווט':          ('🧭 UX', 'תפריט לא נמצא — משתמשים לא יכולים לנווט באתר. זו בעיה קריטית בחוויית המשתמש.'),
+    'Favicon':              ('🎨 מיתוג', 'ללא favicon — הכרטיסייה בדפדפן מציגה אייקון גנרי. פוגע במיתוג ובמקצועיות.'),
+    'קישורים פנימיים שבורים': ('🔗 UX + SEO', 'קישורים שמחזירים 404 גורמים למשתמשים לתקוע ולסינון של גוגל לדפים שבורים. פוגע בדירוג ובחוויית משתמש.'),
+    'שגיאות JavaScript':    ('⚙️ תקינות', 'שגיאת JS עלולה לגרום לאלמנטים לא לעבוד — כפתורים, טפסים, תצוגות. חלק מהמשתמשים לא יוכלו לבצע פעולות באתר.'),
+    'טופס יצירת קשר':       ('📞 לידים', 'טופס יצירת קשר לא נמצא — מבקרים לא יכולים ליצור קשר. זה אומר אפס לידים מהאתר.'),
+    "ווידג'טי API":          ('📊 תוכן', 'ווידג\'טים עם נתוני המדד מוסתרים — המבקר לא רואה את הנתונים המרכזיים של האתר.'),
+    'ערך מדד':              ('📊 תוכן', 'ערך המדד המוצג באתר שונה ממה שה-API מחזיר — משתמשים רואים נתונים שגויים.'),
+    'TTFB':                 ('⚡ ביצועים', 'תגובת שרת איטית פוגעת בדירוג גוגל ובחוויית משתמש. גוגל מוריד דירוג לאתרים עם TTFB>2 שניות.'),
+    'זמן טעינה':            ('⚡ ביצועים', 'טעינה איטית = נטישה. 53% מהמשתמשים עוזבים אתר שלוקח יותר מ-3 שניות. גוגל גם מוריד דירוג.'),
+    'גודל עמוד':            ('⚡ ביצועים', 'עמוד כבד מדי טוען לאט, במיוחד במובייל. גם מחייב יותר נתונים מהמשתמש — חשוב למשתמשי מובייל עם מכסת גלישה.'),
+    'כפתור טלפון':          ('📞 המרות', 'לא נמצא קישור tel: — מבקרים ממובייל לא יכולים להתקשר בלחיצה אחת. פוגע ישירות בהמרות.'),
+}
+
+def get_issue_explanation(check_name):
+    """מוצא הסבר לפי מפתח חלקי בשם הבדיקה."""
+    for key, (category, explanation) in ISSUE_EXPLANATIONS.items():
+        if key in check_name:
+            return category, explanation
+    return None, None
 
 # ─── False-positive filters ───────────────────────────────────────────────────
 FALSE_POSITIVE_DETAILS = ['STAT:', 'nameID', 'Table discarded', '_ga', '_gcl']
@@ -883,38 +922,74 @@ def build_word_report(all_results, expected, static_checks, ts, pages):
             add_row(tbl_p, [r['page'][:40], ttfb, load, size], bg=bg)
     doc.add_paragraph()
 
+    def add_issue_block(doc, idx, check, info, real_results, bg_color, sev_label):
+        """מוסיף בלוק מלא לבעיה — כותרת, הסבר, מה קרה, תיקון, screenshot."""
+        heading(doc, f'{idx}. {check}', 2)
+
+        # קטגוריה והסבר
+        category, explanation = get_issue_explanation(check)
+        if category:
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            r1 = p.add_run(f'{category}  |  ')
+            r1.bold = True
+            r1.font.color.rgb = RGBColor(80, 80, 80)
+            r1.font.size = Pt(10)
+            r2 = p.add_run(explanation)
+            r2.font.color.rgb = RGBColor(60, 60, 60)
+            r2.font.size = Pt(10)
+
+        # מה קרה
+        para(doc, f'🔍 מה זוהה: {info["issue"]["detail"][:300]}', color=(80,80,80))
+        para(doc, f'📄 עמודים: {", ".join(info["pages"][:8])}', color=(80,80,80))
+
+        # איך מתקנים
+        doc.add_paragraph()
+        para(doc, '🔧 איך מתקנים:', bold=True, color=(0,80,0))
+        para(doc, info['issue']['fix'], color=(20,100,20))
+        doc.add_paragraph()
+
+        # screenshot של העמוד הראשון שנפגע (מ-Chrome 1920 — full page)
+        first_page = info['pages'][0] if info['pages'] else None
+        if first_page:
+            chrome_match = next((r for r in real_results
+                                 if r['page'] == first_page
+                                 and 'Chrome 1920' in r['device']
+                                 and r.get('screenshot')), None)
+            match = chrome_match or next((r for r in real_results
+                                          if r['page'] == first_page
+                                          and r.get('screenshot')), None)
+            if match and (SCREENSHOTS_DIR / match['screenshot']).exists():
+                try:
+                    p = doc.add_paragraph()
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    r = p.add_run(f'צילום מסך: {first_page} (Desktop Chrome)')
+                    r.font.size = Pt(9)
+                    r.font.color.rgb = RGBColor(120,120,120)
+                    doc.add_picture(str(SCREENSHOTS_DIR / match['screenshot']), width=Cm(14))
+                except Exception:
+                    pass
+        doc.add_paragraph()
+
     # ═══ בעיות קריטיות ═══
     heading(doc, 'חלק א׳ — בעיות קריטיות', 1)
     if not errors_u:
         para(doc, '✅ לא נמצאו בעיות קריטיות.', color=(0,128,0))
     else:
-        para(doc, f'נמצאו {len(errors_u)} בעיות קריטיות.', color=(180,0,0), bold=True)
+        para(doc, f'נמצאו {len(errors_u)} בעיות קריטיות — דורשות טיפול מיידי.', color=(180,0,0), bold=True)
         doc.add_paragraph()
         for idx, ((sev, check, detail), info) in enumerate(errors_u.items(), 1):
-            heading(doc, f'{idx}. {check}', 2)
-            para(doc, f'מה קרה: {info["issue"]["detail"][:250]}')
-            para(doc, f'איפה: {", ".join(info["pages"][:6])}')
-            para(doc, f'מכשירים: {", ".join(info["devices"][:4])}')
-            doc.add_paragraph()
-            para(doc, 'איך מתקנים:', bold=True)
-            para(doc, info['issue']['fix'])
-            first_page = info['pages'][0] if info['pages'] else None
-            if first_page:
-                match = next((r for r in real_results if r['page'] == first_page and r['screenshot']), None)
-                if match and (SCREENSHOTS_DIR / match['screenshot']).exists():
-                    try: doc.add_picture(str(SCREENSHOTS_DIR / match['screenshot']), width=Cm(13))
-                    except: pass
-            doc.add_paragraph()
+            add_issue_block(doc, idx, check, info, real_results, 'FFD7D7', 'שגיאה')
 
     # ═══ אזהרות ═══
     heading(doc, 'חלק ב׳ — אזהרות', 1)
     if not warnings_u:
         para(doc, '✅ אין אזהרות.', color=(0,128,0))
     else:
-        tbl2 = make_table(doc, ['#', 'בדיקה', 'פרטים', 'עמודים', 'תיקון'], '34495E')
+        para(doc, f'{len(warnings_u)} אזהרות — לא קריטיות אך מומלץ לטפל.', color=(180,120,0), bold=True)
+        doc.add_paragraph()
         for idx, ((sev, check, detail), info) in enumerate(warnings_u.items(), 1):
-            pages_str = ', '.join(info['pages'][:4]) + (f' (+{len(info["pages"])-4})' if len(info['pages'])>4 else '')
-            add_row(tbl2, [str(idx), check, info['issue']['detail'][:100], pages_str, info['issue']['fix'][:100]], bg='FFF8E7')
+            add_issue_block(doc, idx, check, info, real_results, 'FFF3CD', 'אזהרה')
     doc.add_paragraph()
 
     # ═══ פירוט לפי עמוד ═══
