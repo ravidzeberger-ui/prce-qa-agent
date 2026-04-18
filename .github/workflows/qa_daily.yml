@@ -21,7 +21,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt twilio
+        run: |
+          for i in 1 2 3; do
+            pip install -r requirements.txt twilio && break
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
 
       - name: Install Playwright browsers with system dependencies
         run: python -m playwright install --with-deps chromium firefox webkit
