@@ -673,8 +673,10 @@ async def check_page(page, page_info, expected, device):
         try:
             visual = await page.evaluate("""
                 () => {
-                    const rootStyle = getComputedStyle(document.documentElement);
-                    const globalCss = rootStyle.getPropertyValue('--e-global-color-primary').trim();
+                    // Elementor defines CSS vars on .elementor-kit-XX, not on :root/html
+                    const kit = document.querySelector('[class*="elementor-kit-"]') || document.body;
+                    const kitStyle = getComputedStyle(kit);
+                    const globalCss = kitStyle.getPropertyValue('--e-global-color-primary').trim();
                     const bodyH = document.body.scrollHeight;
                     const sections = document.querySelectorAll(
                         '.elementor-section, .e-con, .elementor-container');
