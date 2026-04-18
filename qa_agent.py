@@ -1088,45 +1088,63 @@ def build_whatsapp_summary(all_results, static_checks, api_data):
             lines.append(f"  {i}")
         lines.append('')
 
-    # ספור שגיאות ואזהרות (ללא כפילויות)
-    errors = []
-    warnings = []
-    seen_issues = set()
+    # קיבוץ לפי שם בדיקה — לכל בעיה: קטגוריה, עמודים מושפעים, הסבר
+    errors_by_check = {}    # check -> {'pages': set, 'detail': str}
+    warnings_by_check = {}
 
     for result in all_results:
-        page_path = result.get('path', '')
+        page_path = result.get('path', '/') or '/'
         for issue in result.get('issues', []):
-            key = (page_path, issue.get('check', ''), issue.get('detail', '')[:50])
-            if key in seen_issues:
+            check = issue.get('check', '')
+            sev = issue.get('severity')
+            bucket = errors_by_check if sev == 'error' else (warnings_by_check if sev == 'warning' else None)
+            if bucket is None:
                 continue
-            seen_issues.add(key)
+            if check not in bucket:
+                bucket[check] = {'pages': set(), 'detail': issue.get('detail', '')}
+            bucket[check]['pages'].add(page_path)
 
-            entry = f"• {page_path}: {issue.get('check', '')}"
-            if issue.get('severity') == 'error':
-                errors.append(entry)
-            elif issue.get('severity') == 'warning':
-                warnings.append(entry)
+    def fmt_issue_block(check, info):
+        category, explanation = get_issue_explanation(check)
+        cat = category or '•'
+        pages = sorted(info['pages'])
+        page_str = ', '.join(pages[:3]) + (f" +{len(pages)-3}" if len(pages) > 3 else '')
+        block = [f"{cat} *{check}*"]
+        block.append(f"  📄 {len(pages)} עמודים: {page_str}")
+        if explanation:
+            # קיצור ההסבר למשפט ראשון
+            short = explanation.split('.')[0].strip()
+            if short:
+                block.append(f"  💡 {short}.")
+        return block
 
-    total_issues = len(errors) + len(warnings)
+    total_issues = len(errors_by_check) + len(warnings_by_check)
 
     if total_issues == 0 and not infra_issues:
         lines.append('✅ *הכל תקין — אין בעיות!*')
     else:
-        if errors:
-            lines.append(f'❌ *שגיאות ({len(errors)}):*')
-            for e in errors[:8]:  # מקסימום 8
-                lines.append(f"  {e}")
-            if len(errors) > 8:
-                lines.append(f"  ...ועוד {len(errors)-8}")
+        if errors_by_check:
+            lines.append(f'❌ *שגיאות ({len(errors_by_check)} סוגים):*')
             lines.append('')
+            for check, info in list(errors_by_check.items())[:6]:
+                lines.extend(fmt_issue_block(check, info))
+                lines.append('')
+            if len(errors_by_check) > 6:
+                lines.append(f"  ...ועוד {len(errors_by_check)-6} סוגי שגיאות")
+                lines.append('')
 
-        if warnings:
-            lines.append(f'⚠️ *אזהרות ({len(warnings)}):*')
-            for w in warnings[:6]:  # מקסימום 6
-                lines.append(f"  {w}")
-            if len(warnings) > 6:
-                lines.append(f"  ...ועוד {len(warnings)-6}")
+        if warnings_by_check:
+            lines.append(f'⚠️ *אזהרות ({len(warnings_by_check)} סוגים):*')
             lines.append('')
+            for check, info in list(warnings_by_check.items())[:5]:
+                lines.extend(fmt_issue_block(check, info))
+                lines.append('')
+            if len(warnings_by_check) > 5:
+                lines.append(f"  ...ועוד {len(warnings_by_check)-5} סוגי אזהרות")
+                lines.append('')
+
+        lines.append('📎 *הדוח המלא* עם הסברים ותמונות מסך — בתיקיית reports/ ובגיטהאב')
+        lines.append('')
 
     lines.append('— QA Agent • prce.co.il')
     return '\n'.join(RTL + l if l.strip() else l for l in lines)
