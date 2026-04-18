@@ -8,7 +8,7 @@ import json
 import base64
 import requests
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 
@@ -23,13 +23,30 @@ from docx.oxml import OxmlElement
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
+# ─── חגי בורסת ת"א (TASE) — עדכן מדי שנה ─────────────────────────────────────
+# ימים שבהם הבורסה סגורה (שישי/שבת נסגרים אוטומטית בלוגיקת weekday)
+TASE_HOLIDAYS = {
+    # 2026 — תשפ"ו/תשפ"ז
+    date(2026, 3,  3),   # פורים
+    date(2026, 4,  2),   # פסח — יום א׳
+    date(2026, 4,  8),   # פסח — יום ז׳ (אחרון בישראל)
+    date(2026, 4, 21),   # יום הזיכרון
+    date(2026, 4, 22),   # יום העצמאות
+    date(2026, 5, 22),   # שבועות
+    date(2026, 9, 11),   # ראש השנה — יום א׳ (5787)
+    date(2026, 9, 12),   # ראש השנה — יום ב׳
+    date(2026, 9, 20),   # יום כיפור
+    date(2026, 9, 25),   # סוכות — יום א׳
+    date(2026, 10, 2),   # שמיני עצרת / שמחת תורה
+}
+
 # ─── עזרים: ימי מסחר ──────────────────────────────────────────────────────────
 def get_last_trading_day(reference_date=None):
-    """מחזיר את יום המסחר האחרון (שני עד שישי בלבד)"""
+    """מחזיר את יום המסחר האחרון בבורסת ת"א (שני-שישי, לא חג)."""
     if reference_date is None:
         reference_date = datetime.now().date()
     day = reference_date - timedelta(days=1)
-    while day.weekday() >= 5:  # 5=שבת, 6=ראשון
+    while day.weekday() >= 5 or day in TASE_HOLIDAYS:  # 5=שישי, 6=שבת
         day -= timedelta(days=1)
     return day
 
@@ -650,7 +667,53 @@ async def check_page(page, page_info, expected, device):
                        'fix': 'בדוק ב-Elementor שכפתור הטלפון מוגדר עם href="tel:0524446533"'})
 
     # ══════════════════════════════════════════════════════
-    # 21. צילום מסך
+    # 21. בדיקת נראות ויזואלית — CSS של Elementor
+    # ══════════════════════════════════════════════════════
+    if device['name'] == 'Desktop Chrome 1920':  # בודק רק פעם אחת לעמוד
+        try:
+            visual = await page.evaluate("""
+                () => {
+                    const rootStyle = getComputedStyle(document.documentElement);
+                    const globalCss = rootStyle.getPropertyValue('--e-global-color-primary').trim();
+                    const bodyH = document.body.scrollHeight;
+                    const sections = document.querySelectorAll(
+                        '.elementor-section, .e-con, .elementor-container');
+                    const visibleSections = Array.from(sections)
+                        .filter(s => s.offsetHeight > 50).length;
+                    return {
+                        globalCssLoaded: globalCss !== '',
+                        primaryColor: globalCss,
+                        bodyHeight: bodyH,
+                        visibleSections: visibleSections
+                    };
+                }
+            """)
+            if not visual.get('globalCssLoaded'):
+                issues.append({
+                    'severity': 'error',
+                    'check': 'נראות — CSS גלובלי של Elementor',
+                    'detail': 'משתני CSS גלובליים (צבעי האתר) לא נטענו — קובץ CSS של Elementor מחזיר שגיאה!',
+                    'fix': 'ב-Elementor → Tools → Regenerate CSS and Data. נקה ezCache לאחר מכן.'
+                })
+            elif visual.get('bodyHeight', 9999) < 500:
+                issues.append({
+                    'severity': 'error',
+                    'check': 'נראות — תוכן עמוד',
+                    'detail': f'גובה העמוד חשוד: {visual.get("bodyHeight")}px — ייתכן שהעמוד ריק',
+                    'fix': 'בדוק שה-CSS של Elementor נטען ושיש תוכן בעמוד'
+                })
+            elif visual.get('visibleSections', 99) < 2:
+                issues.append({
+                    'severity': 'warning',
+                    'check': 'נראות — sections גלויים',
+                    'detail': f'רק {visual.get("visibleSections", 0)} sections גלויים — ייתכן שהעמוד נראה שבור',
+                    'fix': 'בדוק ב-Elementor שכל הסקציות מוצגות, ורנדר CSS מחדש אם נדרש'
+                })
+        except Exception:
+            pass
+
+    # ══════════════════════════════════════════════════════
+    # 22. צילום מסך
     # ══════════════════════════════════════════════════════
     ss_name = f"{device['name'].replace(' ','_')}_{page_info['path'].strip('/').replace('/','_') or 'home'}.png"
     ss_path = SCREENSHOTS_DIR / ss_name
