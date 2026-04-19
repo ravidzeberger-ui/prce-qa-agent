@@ -714,6 +714,44 @@ async def check_page(page, page_info, expected, device):
         except Exception:
             pass
 
+        # ── בדיקת קבצי CSS של Elementor שהדף טוען (רק פעם אחת לדף) ──
+        try:
+            css_urls = await page.evaluate("""
+                () => Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+                    .map(l => l.href)
+                    .filter(h => h.includes('/wp-content/uploads/elementor/css/'))
+            """)
+            missing = []
+            tiny = []
+            for url in css_urls:
+                try:
+                    clean = url.split('?')[0]
+                    rr = requests.head(url, timeout=6, allow_redirects=True)
+                    if rr.status_code == 404:
+                        missing.append(clean.split('/')[-1])
+                    elif rr.status_code == 200:
+                        size = int(rr.headers.get('content-length', 0))
+                        if 0 < size < 300:
+                            tiny.append(f"{clean.split('/')[-1]} ({size}B)")
+                except Exception:
+                    continue
+            if missing:
+                issues.append({
+                    'severity': 'error',
+                    'check': 'נראות — קבצי CSS של Elementor חסרים',
+                    'detail': f'{len(missing)} קבצי CSS מחזירים 404: {", ".join(missing[:4])}. הדף טוען אותם ב-<link> אבל הם לא קיימים על השרת — הסגנונות חסרים, הדפדפן נופל ל-fallback (פונט ענק במובייל, layout שבור).',
+                    'fix': 'Elementor → Tools → Regenerate Files & Data. אם יש WP Rocket/ezCache — נקה אותם. זה בדיוק מה שקרה ב-19.4 בבוקר.'
+                })
+            if tiny:
+                issues.append({
+                    'severity': 'warning',
+                    'check': 'נראות — קובץ CSS חשוד בגודלו',
+                    'detail': f'קבצי CSS קטנים מאוד (רנדור נכשל חלקית?): {", ".join(tiny[:3])}',
+                    'fix': 'Elementor → Tools → Regenerate Files & Data.'
+                })
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════
     # 21b. בדיקת גלישה אופקית במובייל (חשוב ל-RTL עברית)
     # ══════════════════════════════════════════════════════
@@ -848,6 +886,8 @@ ISSUE_EXPLANATIONS = {
     'sections גלויים':      ('🎨 נראות', 'מעט מאוד sections גלויים בעמוד — ייתכן שחלקים גדולים מהעמוד מוסתרים בגלל תקלת CSS.'),
     'גלישה אופקית':         ('📱 נראות מובייל', 'תוכן חורג מרוחב המסך במובייל — המשתמש צריך לגלול ימינה/שמאלה כדי לראות הכל, או שהטקסט חתוך. זו חוויה שבורה שגורמת לנטישה מיידית במובייל (60%+ מהתעבורה).'),
     'כותרת ענקית':          ('📱 נראות מובייל', 'כותרות ב-H1/H2 גדולות מדי למובייל (פונט תופס >10% מרוחב המסך) — הטקסט נראה מגושם, נשבר לפי תו בודד, ועלול להיחתך. נגרם כשגודל פונט מוגדר בפיקסלים קשיחים בלי media query למובייל.'),
+    'קובץ CSS של הכתבה':    ('🎨 נראות', 'קובץ ה-CSS הספציפי של הדף (post-XXX.css של Elementor) חסר או פגום. הדפדפן נופל ל-fallback גנרי — H1 ענק, layout מעורבל, נראות שבורה. סיבה שכיחה: WP Rocket/ezCache מחק את הקובץ ו-Elementor עוד לא בנה אותו מחדש. זה בדיוק מה שקרה ב-19.4 בבוקר.'),
+    'קובץ CSS חשוד':        ('🎨 נראות', 'קובץ ה-CSS של הדף קטן בצורה חריגה — ייתכן שהרנדור נכשל באמצע. יגרום לסגנונות חסרים.'),
     'נתונים מיושנים':       ('⚠️ אמינות', 'נתוני ה-API אינם מעודכנים. מבקרים רואים מידע ישן שמפחית את הערך של האתר.'),
     'noindex':              ('🔴 SEO קריטי', 'העמוד מסומן "noindex" — גוגל לא יאנדקס אותו ולא יציג אותו בתוצאות חיפוש. זה עלול למחוק את כל הדירוג שנצבר לאותו עמוד.'),
     'H1':                   ('📈 SEO', 'כותרת H1 היא הסימן הכי חשוב לגוגל לגבי נושא העמוד. ללא H1, גוגל מתקשה לדרג את העמוד לביטויי חיפוש רלוונטיים.'),
