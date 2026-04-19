@@ -2,7 +2,7 @@ name: QA Daily Report
 
 on:
   schedule:
-    - cron: '0 5 * * *'   # 08:00 שעון ישראל (UTC+3 קיץ)
+    - cron: '0 4 * * *'   # יעד 07:00 שעון ישראל (UTC+3 קיץ) — מוקדם בשעה כדי לפצות על עיכובי GitHub Actions ולהגיע בפועל ~08:00
   workflow_dispatch:        # הפעלה ידנית מ-GitHub
 
 jobs:
