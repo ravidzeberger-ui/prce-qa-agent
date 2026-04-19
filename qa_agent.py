@@ -715,6 +715,69 @@ async def check_page(page, page_info, expected, device):
             pass
 
     # ══════════════════════════════════════════════════════
+    # 21b. בדיקת גלישה אופקית במובייל (חשוב ל-RTL עברית)
+    # ══════════════════════════════════════════════════════
+    if device.get('is_mobile'):
+        try:
+            mobile_vis = await page.evaluate("""
+                () => {
+                    const docW = document.documentElement.scrollWidth;
+                    const innerW = window.innerWidth;
+                    const overflowPx = docW - innerW;
+                    // אלמנטים שחורגים אופקית
+                    const offenders = [];
+                    document.querySelectorAll('*').forEach(el => {
+                        if (offenders.length >= 5) return;
+                        const r = el.getBoundingClientRect();
+                        if ((r.right > innerW + 5 || r.left < -5) && r.width > 20 && el.innerText) {
+                            const fs = parseFloat(getComputedStyle(el).fontSize) || 0;
+                            offenders.push({
+                                sel: el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ')[0] : ''),
+                                text: (el.innerText||'').slice(0,30),
+                                fontSize: fs,
+                                width: Math.round(r.width)
+                            });
+                        }
+                    });
+                    // כותרות ראשיות עם פונט גדול מדי למובייל
+                    const oversized = [];
+                    document.querySelectorAll('h1, h2, .elementor-heading-title').forEach(el => {
+                        if (oversized.length >= 3) return;
+                        const fs = parseFloat(getComputedStyle(el).fontSize) || 0;
+                        const ratio = fs / innerW;
+                        if (fs > 40 && ratio > 0.09) {
+                            oversized.push({
+                                tag: el.tagName, fontSize: fs, ratio: ratio,
+                                text: (el.innerText||'').slice(0,30)
+                            });
+                        }
+                    });
+                    return {overflowPx, innerW, offenders, oversized};
+                }
+            """)
+            overflow = mobile_vis.get('overflowPx', 0)
+            offenders = mobile_vis.get('offenders', [])
+            oversized = mobile_vis.get('oversized', [])
+            if overflow > 5 or offenders:
+                sample = '; '.join(f"{o['sel']} ({o['fontSize']:.0f}px)" for o in offenders[:3])
+                issues.append({
+                    'severity': 'error',
+                    'check': 'נראות מובייל — גלישה אופקית',
+                    'detail': f'תוכן חורג מרוחב המסך ב-{overflow}px (viewport {mobile_vis.get("innerW")}px). אלמנטים חריגים: {sample or "—"}',
+                    'fix': 'הוסף CSS: article, .entry-content { overflow-wrap: break-word; word-break: break-word; max-width: 100%; }'
+                })
+            if oversized:
+                sample = '; '.join(f"{o['tag']} {o['fontSize']:.0f}px ({o['ratio']*100:.0f}% מהרוחב)" for o in oversized[:2])
+                issues.append({
+                    'severity': 'error',
+                    'check': 'נראות מובייל — כותרת ענקית',
+                    'detail': f'כותרת עם פונט גדול מדי ל-viewport {mobile_vis.get("innerW")}px: {sample}',
+                    'fix': 'הוסף CSS: @media (max-width:767px) { article h1, .elementor-heading-title { font-size: clamp(1.5rem,6vw,2rem) !important; } }'
+                })
+        except Exception:
+            pass
+
+    # ══════════════════════════════════════════════════════
     # 22. צילום מסך
     # ══════════════════════════════════════════════════════
     ss_name = f"{device['name'].replace(' ','_')}_{page_info['path'].strip('/').replace('/','_') or 'home'}.png"
@@ -783,6 +846,8 @@ ISSUE_EXPLANATIONS = {
     'CSS גלובלי':           ('🎨 נראות', 'קובץ עיצוב ראשי של Elementor לא נטען — האתר ייראה ללא צבעים, ללא פונטים וללא עיצוב. כל המבקרים יראו דף לבן/שבור. זה קרה ב-16.4 וגרם ל-crash של האתר.'),
     'תוכן עמוד':            ('🎨 נראות', 'גובה העמוד חשוד מאוד — ייתכן שהעמוד ריק לחלוטין. מבקרים יראו עמוד ריק ויעזבו מיד.'),
     'sections גלויים':      ('🎨 נראות', 'מעט מאוד sections גלויים בעמוד — ייתכן שחלקים גדולים מהעמוד מוסתרים בגלל תקלת CSS.'),
+    'גלישה אופקית':         ('📱 נראות מובייל', 'תוכן חורג מרוחב המסך במובייל — המשתמש צריך לגלול ימינה/שמאלה כדי לראות הכל, או שהטקסט חתוך. זו חוויה שבורה שגורמת לנטישה מיידית במובייל (60%+ מהתעבורה).'),
+    'כותרת ענקית':          ('📱 נראות מובייל', 'כותרות ב-H1/H2 גדולות מדי למובייל (פונט תופס >10% מרוחב המסך) — הטקסט נראה מגושם, נשבר לפי תו בודד, ועלול להיחתך. נגרם כשגודל פונט מוגדר בפיקסלים קשיחים בלי media query למובייל.'),
     'נתונים מיושנים':       ('⚠️ אמינות', 'נתוני ה-API אינם מעודכנים. מבקרים רואים מידע ישן שמפחית את הערך של האתר.'),
     'noindex':              ('🔴 SEO קריטי', 'העמוד מסומן "noindex" — גוגל לא יאנדקס אותו ולא יציג אותו בתוצאות חיפוש. זה עלול למחוק את כל הדירוג שנצבר לאותו עמוד.'),
     'H1':                   ('📈 SEO', 'כותרת H1 היא הסימן הכי חשוב לגוגל לגבי נושא העמוד. ללא H1, גוגל מתקשה לדרג את העמוד לביטויי חיפוש רלוונטיים.'),
